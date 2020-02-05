@@ -5,7 +5,7 @@
 ## Currently tested with
 
 - [Terraform](https://www.terraform.io/downloads.html) v0.12+
-- [Go](https://golang.org/doc/install) 1.13 (to build the provider plugin)
+- [Go](https://golang.org/doc/install) 1.14 (to build the provider plugin)
 
 ## Installing the provider
 

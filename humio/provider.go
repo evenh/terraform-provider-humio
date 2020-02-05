@@ -17,10 +17,14 @@ package humio
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	humio "github.com/humio/cli/api"
 )
+
+// tfMap is a shorthand alias for convenience; Terraform uses this type a *lot*.
+type tfMap = map[string]interface{}
 
 func Provider() *schema.Provider {
 	return &schema.Provider{
@@ -37,8 +41,9 @@ func Provider() *schema.Provider {
 		ResourcesMap: map[string]*schema.Resource{
 			"humio_alert":        resourceAlert(),
 			"humio_ingest_token": resourceIngestToken(),
-			"humio_parser":       resourceParser(),
 			"humio_notifier":     resourceNotifier(),
+			"humio_parser":       resourceParser(),
+			"humio_repository":   resourceRepository(),
 		},
 		Schema: map[string]*schema.Schema{
 			"addr": {
@@ -75,4 +80,14 @@ func validateURL(val interface{}, key string) (warns []string, errs []error) {
 		errs = append(errs, fmt.Errorf("error: %s must begin with http or https", v))
 	}
 	return warns, errs
+}
+
+func parseRepositoryAndName(id string) [2]string {
+	var repository, name string
+	parts := strings.SplitN(id, "+", 2)
+	if len(parts) == 2 {
+		repository = parts[0]
+		name = parts[1]
+	}
+	return [2]string{repository, name}
 }

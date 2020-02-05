@@ -27,14 +27,17 @@ import (
 
 var rxEmail = regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+\\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$")
 
-type tfMap = map[string]interface{}
-
 func resourceNotifier() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceNotifierCreate,
 		Read:   resourceNotifierRead,
 		Update: resourceNotifierUpdate,
 		Delete: resourceNotifierDelete,
+		/*
+			Importer: &schema.ResourceImporter{
+				State: schema.ImportStatePassthrough,
+			},
+		*/
 
 		Schema: map[string]*schema.Schema{
 			"repository": {
@@ -222,10 +225,12 @@ func resourceNotifierCreate(d *schema.ResourceData, client interface{}) error {
 		return fmt.Errorf("could not create notifier: %v", err)
 	}
 	d.SetId(n.ID)
+
 	return resourceNotifierRead(d, client)
 }
 
 func resourceNotifierRead(d *schema.ResourceData, client interface{}) error {
+	// TODO: to fix import functionality, we must ensure the user can provide the notifier ID, which we use to look up repository name and alert name
 	notifier, err := client.(*humio.Client).Notifiers().Get(d.Get("repository").(string), d.Get("name").(string))
 	if err != nil {
 		return fmt.Errorf("could not get notifier: %v", err)
@@ -240,7 +245,6 @@ func resourceDataFromNotifier(n *humio.Notifier, d *schema.ResourceData) error {
 	for k, v := range n.Properties {
 		d.Set(k, v)
 	}
-	d.SetId(d.Id())
 	return nil
 }
 
@@ -254,7 +258,6 @@ func resourceNotifierUpdate(d *schema.ResourceData, client interface{}) error {
 	if err != nil {
 		return fmt.Errorf("could not create notifier: %v", err)
 	}
-	d.SetId(notifier.ID)
 
 	return resourceNotifierRead(d, client)
 }
