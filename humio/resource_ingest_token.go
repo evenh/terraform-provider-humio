@@ -32,8 +32,9 @@ func resourceIngestToken() *schema.Resource {
 				Computed: true,
 			},
 			"token": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:      schema.TypeString,
+				Computed:  true,
+				Sensitive: true,
 			},
 		},
 	}
