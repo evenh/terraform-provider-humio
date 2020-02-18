@@ -22,8 +22,7 @@ func resourceParser() *schema.Resource {
 			},
 			"name": {
 				Type:     schema.TypeString,
-				Optional: true,
-				Default:  "",
+				Required: true,
 			},
 			"tag_fields": {
 				Type:     schema.TypeList,
@@ -70,9 +69,9 @@ func resourceParserRead(d *schema.ResourceData, client interface{}) error {
 
 func resourceDataFromParser(a *humio.Parser, d *schema.ResourceData) error {
 	d.Set("name", a.Name)
-	d.Set("script", a.Script)
+	d.Set("parser_script", a.Script)
 	d.Set("tag_fields", a.TagFields)
-	d.Set("tests", a.Tests)
+	d.Set("test_data", a.Tests)
 	d.SetId(d.Id())
 	return nil
 }
