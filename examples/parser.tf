@@ -1,12 +1,17 @@
-/*
-resource "humio_parser" "accesslog" {
+resource "humio_parser" "emojis_loglevels" {
     repository    = "humio"
-    name          = "accesslog"
+    name          = "emojis"
     parser_script = <<PARSERSCRIPT
-regex("(?<client>\\S+) - (?<userid>\\S+) \\[(?<@timestamp>.*)\\] \"(?<method>\\S+) (?<url>\\S+)? (?<httpversion>\\S+)?\" (?<statuscode>\\d+) (?<body_bytes_sent_to_client>\\S+) \"(?<referrer>.*)\" \"(?<useragent>.*)\" (?<responsetime>\\S+) (?<request_length>\\S+)\\s*(?<humiotime>\\S+)?") | parseTimestamp(field=@timestamp, format="dd/MMM/yyyy:HH:mm:ss Z")
+case {
+  🔥 | loglevel:="error";
+  😕 | loglevel:="warning";
+  🙂 | loglevel:="info";
+
+//Everything else
+  * | loglevel:="unknown";
+}
 PARSERSCRIPT
 }
-*/
 
 resource "humio_parser" "filebeat" {
     repository    = "humio"
@@ -62,18 +67,6 @@ resource "humio_parser" "http_error" {
 regex("(?<@timestamp>[\\d\\/\\:]+\\s+[\\d\\/\\:]+)\\s+(\\[(?<severity>[^\\]]+)\\])?") | parseTimestamp(field=@timestamp, format="yyyy/MM/dd' 'HH:mm:ss", timezone="UTC")
 PARSERSCRIPT
 }
-
-/*
-resource "humio_parser" "humio" {
-    repository    = "humio"
-    name          = "humio"
-    parser_script = <<PARSERSCRIPT
-/(?<@timestamp>\S+)\s+\[(?<thread>.+?)\]\s+(?<loglevel>\w+)\s+(?<class>\S+)/ |
- parseTimestamp(field=@timestamp, format="yyyy-MM-dd'T'HH:mm:ss.SSSZ") |
- kvParse()
-PARSERSCRIPT
-}
-*/
 
 resource "humio_parser" "humio_stdout" {
     repository    = "humio"
