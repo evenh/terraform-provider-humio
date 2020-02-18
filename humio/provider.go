@@ -43,6 +43,7 @@ func Provider() *schema.Provider {
 			"api_token": {
 				Type:        schema.TypeString,
 				Required:    true,
+				Sensitive:   true,
 				DefaultFunc: schema.EnvDefaultFunc("HUMIO_API_TOKEN", nil),
 			},
 		},
