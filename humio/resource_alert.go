@@ -28,6 +28,9 @@ func resourceAlert() *schema.Resource {
 		Read:   resourceAlertRead,
 		Update: resourceAlertUpdate,
 		Delete: resourceAlertDelete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"repository": {
@@ -42,6 +45,7 @@ func resourceAlert() *schema.Resource {
 			"name": {
 				Type:     schema.TypeString,
 				Required: true,
+				ForceNew: true,
 			},
 			"link_url": {
 				Type:     schema.TypeString,
@@ -69,7 +73,6 @@ func resourceAlert() *schema.Resource {
 				Type:     schema.TypeList,
 				Optional: true,
 				Elem:     &schema.Schema{Type: schema.TypeString},
-				//ForceNew: true, // TODO(mike): figure out why apply causing an in-place update fails. running apply again works!?
 			},
 			"labels": {
 				Type:     schema.TypeList,
@@ -86,16 +89,27 @@ func resourceAlertCreate(d *schema.ResourceData, client interface{}) error {
 		return fmt.Errorf("could not obtain alert from resource data: %v", err)
 	}
 
-	n, err := client.(*humio.Client).Alerts().Add(d.Get("repository").(string), &alert, false)
+	_, err = client.(*humio.Client).Alerts().Add(d.Get("repository").(string), &alert, false)
 	if err != nil {
 		return fmt.Errorf("could not create alert: %v", err)
 	}
-	d.SetId(n.ID)
+	d.SetId(fmt.Sprintf("%s+%s", d.Get("repository"), d.Get("name")))
 
 	return resourceAlertRead(d, client)
 }
 
 func resourceAlertRead(d *schema.ResourceData, client interface{}) error {
+	// If we don't have a repository when importing, we parse it from the ID.
+	if _, ok := d.GetOk("repository"); !ok {
+		parts := parseRepositoryAndName(d.Id())
+		//we check that we have parsed the id into the correct number of segments
+		if parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("Error Importing humio_alert. Please make sure the ID is in the form REPOSITORYNAME+ALERTNAME (i.e. myRepoName+myAlertName")
+		}
+		d.Set("repository", parts[0])
+		d.Set("name", parts[1])
+	}
+
 	alert, err := client.(*humio.Client).Alerts().Get(d.Get("repository").(string), d.Get("name").(string))
 	if err != nil {
 		return fmt.Errorf("could not get alert: %v", err)
@@ -114,7 +128,6 @@ func resourceDataFromAlert(a *humio.Alert, d *schema.ResourceData) error {
 	d.Set("labels", a.Labels)
 	d.Set("query", a.Query.QueryString)
 	d.Set("start", a.Query.Start)
-	d.SetId(d.Id())
 	return nil
 }
 
@@ -128,9 +141,7 @@ func resourceAlertUpdate(d *schema.ResourceData, client interface{}) error {
 	if err != nil {
 		return fmt.Errorf("could not create alert: %v", err)
 	}
-	d.SetId(alert.ID)
 
-	// TODO(mike): Updating a resource with a different set of notifiers updates the state to not contain the new notifiers
 	return resourceAlertRead(d, client)
 }
 

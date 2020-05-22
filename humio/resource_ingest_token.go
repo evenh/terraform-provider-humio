@@ -28,6 +28,9 @@ func resourceIngestToken() *schema.Resource {
 		Read:   resourceIngestTokenRead,
 		Update: resourceIngestTokenUpdate,
 		Delete: resourceIngestTokenDelete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"repository": {
@@ -55,15 +58,27 @@ func resourceIngestToken() *schema.Resource {
 }
 
 func resourceIngestTokenCreate(d *schema.ResourceData, client interface{}) error {
-	ingestToken, err := client.(*humio.Client).IngestTokens().Add(d.Get("repository").(string), d.Get("name").(string), d.Get("parser").(string))
+	_, err := client.(*humio.Client).IngestTokens().Add(d.Get("repository").(string), d.Get("name").(string), d.Get("parser").(string))
 	if err != nil {
 		return fmt.Errorf("could not create ingest token: %v", err)
 	}
-	d.SetId(ingestToken.Name)
+	d.SetId(fmt.Sprintf("%s+%s", d.Get("repository"), d.Get("name")))
+
 	return resourceIngestTokenRead(d, client)
 }
 
 func resourceIngestTokenRead(d *schema.ResourceData, client interface{}) error {
+	// If we don't have a repository when importing, we parse it from the ID.
+	if _, ok := d.GetOk("repository"); !ok {
+		parts := parseRepositoryAndName(d.Id())
+		//we check that we have parsed the id into the correct number of segments
+		if parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("Error Importing humio_ingest_token. Please make sure the ID is in the form REPOSITORYNAME+INGESTTOKENNAMENAME (i.e. myRepoName+myIngestTokenName")
+		}
+		d.Set("repository", parts[0])
+		d.Set("name", parts[1])
+	}
+
 	ingestToken, err := client.(*humio.Client).IngestTokens().Get(d.Get("repository").(string), d.Get("name").(string))
 	if err != nil {
 		return fmt.Errorf("could not get ingest token: %v", err)
@@ -76,16 +91,14 @@ func resourceDataFromIngestToken(a *humio.IngestToken, d *schema.ResourceData) e
 	d.Set("name", a.Name)
 	d.Set("token", a.Token)
 	d.Set("parser", a.AssignedParser)
-	d.SetId(d.Id())
 	return nil
 }
 
 func resourceIngestTokenUpdate(d *schema.ResourceData, client interface{}) error {
-	ingestToken, err := client.(*humio.Client).IngestTokens().Add(d.Get("repository").(string), d.Get("name").(string), d.Get("parser").(string))
+	_, err := client.(*humio.Client).IngestTokens().Add(d.Get("repository").(string), d.Get("name").(string), d.Get("parser").(string))
 	if err != nil {
 		return fmt.Errorf("could not create ingest token: %v", err)
 	}
-	d.SetId(ingestToken.Name)
 	return resourceAlertRead(d, client)
 }
 

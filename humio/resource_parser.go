@@ -28,6 +28,9 @@ func resourceParser() *schema.Resource {
 		Read:   resourceParserRead,
 		Update: resourceParserUpdate,
 		Delete: resourceParserDelete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"repository": {
@@ -67,12 +70,23 @@ func resourceParserCreate(d *schema.ResourceData, client interface{}) error {
 	if err != nil {
 		return fmt.Errorf("could not create parser: %v", err)
 	}
-	d.SetId(parser.Name)
+	d.SetId(fmt.Sprintf("%s+%s", d.Get("repository"), d.Get("name")))
 
 	return resourceParserRead(d, client)
 }
 
 func resourceParserRead(d *schema.ResourceData, client interface{}) error {
+	// If we don't have a repository when importing, we parse it from the ID.
+	if _, ok := d.GetOk("repository"); !ok {
+		parts := parseRepositoryAndName(d.Id())
+		//we check that we have parsed the id into the correct number of segments
+		if parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("Error Importing humio_parser. Please make sure the ID is in the form REPOSITORYNAME+PARSERNAME (i.e. myRepoName+myParserName")
+		}
+		d.Set("repository", parts[0])
+		d.Set("name", parts[1])
+	}
+
 	parser, err := client.(*humio.Client).Parsers().Get(d.Get("repository").(string), d.Get("name").(string))
 	if err != nil {
 		return fmt.Errorf("could not get parser: %v", err)
@@ -100,15 +114,7 @@ func resourceParserUpdate(d *schema.ResourceData, client interface{}) error {
 	if err != nil {
 		return fmt.Errorf("could not create parser: %v", err)
 	}
-	d.SetId(parser.Name)
 	return resourceParserRead(d, client)
-}
-
-func resourceParserDelete(d *schema.ResourceData, client interface{}) error {
-	if err := client.(*humio.Client).Parsers().Remove(d.Get("repository").(string), d.Get("name").(string)); err != nil {
-		return fmt.Errorf("could not delete parser: %v", err)
-	}
-	return nil
 }
 
 func parserFromResourceData(d *schema.ResourceData, client interface{}) (humio.Parser, error) {
@@ -127,4 +133,11 @@ func convertInterfaceListToParserTestCases(s []interface{}) []humio.ParserTestCa
 		element = append(element, humio.ParserTestCase{Input: value})
 	}
 	return element
+}
+
+func resourceParserDelete(d *schema.ResourceData, client interface{}) error {
+	if err := client.(*humio.Client).Parsers().Remove(d.Get("repository").(string), d.Get("name").(string)); err != nil {
+		return fmt.Errorf("could not delete parser: %v", err)
+	}
+	return nil
 }
