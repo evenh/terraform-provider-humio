@@ -47,11 +47,6 @@ func resourceAlert() *schema.Resource {
 				Required: true,
 				ForceNew: true,
 			},
-			"link_url": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-			},
 			"silenced": {
 				Type:     schema.TypeBool,
 				Optional: true,
@@ -124,7 +119,6 @@ func resourceDataFromAlert(a *humio.Alert, d *schema.ResourceData) error {
 	d.Set("throttle_time_millis", a.ThrottleTimeMillis)
 	d.Set("silenced", a.Silenced)
 	d.Set("notifiers", a.Notifiers)
-	d.Set("link_url", a.LinkURL)
 	d.Set("labels", a.Labels)
 	d.Set("query", a.Query.QueryString)
 	d.Set("start", a.Query.Start)
@@ -159,7 +153,6 @@ func alertFromResourceData(d *schema.ResourceData, client interface{}) (humio.Al
 		ThrottleTimeMillis: d.Get("throttle_time_millis").(int),
 		Silenced:           d.Get("silenced").(bool),
 		Notifiers:          convertInterfaceListToStringSlice(d.Get("notifiers").([]interface{})),
-		LinkURL:            d.Get("link_url").(string),
 		Labels:             convertInterfaceListToStringSlice(d.Get("labels").([]interface{})),
 		Query: humio.HumioQuery{
 			QueryString: d.Get("query").(string),

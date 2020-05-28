@@ -22,8 +22,7 @@ resource "humio_notifier" "example_webhook" {
       "start": "{query_time_start}"
     },
     "notifierID": "{alert_notifier_id}",
-    "id": "{alert_id}",
-    "linkURL": "{url}"
+    "id": "{alert_id}"
   },
   "warnings": "{warnings}",
   "events": {events},
