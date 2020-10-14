@@ -15,21 +15,24 @@
 package humio
 
 import (
+	"context"
 	"fmt"
+	"reflect"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 
 	humio "github.com/humio/cli/api"
 )
 
 func resourceParser() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceParserCreate,
-		Read:   resourceParserRead,
-		Update: resourceParserUpdate,
-		Delete: resourceParserDelete,
+		CreateContext: resourceParserCreate,
+		ReadContext:   resourceParserRead,
+		UpdateContext: resourceParserUpdate,
+		DeleteContext: resourceParserDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -60,64 +63,95 @@ func resourceParser() *schema.Resource {
 	}
 }
 
-func resourceParserCreate(d *schema.ResourceData, client interface{}) error {
-	parser, err := parserFromResourceData(d, client)
+func resourceParserCreate(ctx context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
+	parser, err := parserFromResourceData(d)
 	if err != nil {
-		return fmt.Errorf("could not obtain parser from resource data: %v", err)
+		return diag.Errorf("could not obtain parser from resource data: %s", err)
 	}
 
-	err = client.(*humio.Client).Parsers().Add(d.Get("repository").(string), &parser, false)
+	err = client.(*humio.Client).Parsers().Add(
+		d.Get("repository").(string),
+		&parser,
+		false,
+	)
 	if err != nil {
-		return fmt.Errorf("could not create parser: %v", err)
+		return diag.Errorf("could not create parser: %s", err)
 	}
 	d.SetId(fmt.Sprintf("%s+%s", d.Get("repository"), d.Get("name")))
 
-	return resourceParserRead(d, client)
+	return resourceParserRead(ctx, d, client)
 }
 
-func resourceParserRead(d *schema.ResourceData, client interface{}) error {
+func resourceParserRead(_ context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
 	// If we don't have a repository when importing, we parse it from the ID.
 	if _, ok := d.GetOk("repository"); !ok {
-		parts := parseRepositoryAndName(d.Id())
+		parts := parseRepositoryAndID(d.Id())
 		//we check that we have parsed the id into the correct number of segments
 		if parts[0] == "" || parts[1] == "" {
-			return fmt.Errorf("Error Importing humio_parser. Please make sure the ID is in the form REPOSITORYNAME+PARSERNAME (i.e. myRepoName+myParserName")
+			return diag.Errorf("error importing humio_parser. Please make sure the ID is in the form REPOSITORYNAME+PARSERNAME (i.e. myRepoName+myParserName")
 		}
-		d.Set("repository", parts[0])
-		d.Set("name", parts[1])
+		err := d.Set("repository", parts[0])
+		if err != nil {
+			return diag.Errorf("error setting repository for resource %s: %s", d.Id(), err)
+		}
+		err = d.Set("name", parts[1])
+		if err != nil {
+			return diag.Errorf("error setting name for resource %s: %s", d.Id(), err)
+		}
 	}
 
-	parser, err := client.(*humio.Client).Parsers().Get(d.Get("repository").(string), d.Get("name").(string))
-	if err != nil {
-		return fmt.Errorf("could not get parser: %v", err)
+	parser, err := client.(*humio.Client).Parsers().Get(
+		d.Get("repository").(string),
+		d.Get("name").(string),
+	)
+	if err != nil || reflect.DeepEqual(*parser, humio.Parser{Tests: []humio.ParserTestCase{}}) {
+		return diag.Errorf("could not get parser: %s", err)
 	}
-	resourceDataFromParser(parser, d)
+	return resourceDataFromParser(parser, d)
+}
+
+func resourceDataFromParser(a *humio.Parser, d *schema.ResourceData) diag.Diagnostics {
+	err := d.Set("name", a.Name)
+	if err != nil {
+		return diag.Errorf("error setting name for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("parser_script", a.Script)
+	if err != nil {
+		return diag.Errorf("error setting parser_script for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("tag_fields", a.TagFields)
+	if err != nil {
+		return diag.Errorf("error setting tag_fields for resource %s: %s", d.Id(), err)
+	}
+	var tests []string
+	for _, test2 := range a.Tests {
+		tests = append(tests, test2.Input)
+	}
+	err = d.Set("test_data", tests)
+	if err != nil {
+		return diag.Errorf("error setting test_data for resource %s: %s", d.Id(), err)
+	}
 	return nil
 }
 
-func resourceDataFromParser(a *humio.Parser, d *schema.ResourceData) error {
-	d.Set("name", a.Name)
-	d.Set("parser_script", a.Script)
-	d.Set("tag_fields", a.TagFields)
-	d.Set("test_data", a.Tests)
-	d.SetId(d.Id())
-	return nil
-}
-
-func resourceParserUpdate(d *schema.ResourceData, client interface{}) error {
-	parser, err := parserFromResourceData(d, client)
+func resourceParserUpdate(ctx context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
+	parser, err := parserFromResourceData(d)
 	if err != nil {
-		return fmt.Errorf("could not obtain parser from resource data: %v", err)
+		return diag.Errorf("could not obtain parser from resource data: %s", err)
 	}
 
-	err = client.(*humio.Client).Parsers().Add(d.Get("repository").(string), &parser, true)
+	err = client.(*humio.Client).Parsers().Add(
+		d.Get("repository").(string),
+		&parser,
+		true,
+	)
 	if err != nil {
-		return fmt.Errorf("could not create parser: %v", err)
+		return diag.Errorf("could not update parser: %s", err)
 	}
-	return resourceParserRead(d, client)
+	return resourceParserRead(ctx, d, client)
 }
 
-func parserFromResourceData(d *schema.ResourceData, client interface{}) (humio.Parser, error) {
+func parserFromResourceData(d *schema.ResourceData) (humio.Parser, error) {
 	return humio.Parser{
 		Name:      d.Get("name").(string),
 		Script:    d.Get("parser_script").(string),
@@ -135,9 +169,18 @@ func convertInterfaceListToParserTestCases(s []interface{}) []humio.ParserTestCa
 	return element
 }
 
-func resourceParserDelete(d *schema.ResourceData, client interface{}) error {
-	if err := client.(*humio.Client).Parsers().Remove(d.Get("repository").(string), d.Get("name").(string)); err != nil {
-		return fmt.Errorf("could not delete parser: %v", err)
+func resourceParserDelete(_ context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
+	parser, err := parserFromResourceData(d)
+	if err != nil {
+		return diag.Errorf("could not obtain parser from resource data: %s", err)
+	}
+
+	err = client.(*humio.Client).Parsers().Remove(
+		d.Get("repository").(string),
+		parser.Name,
+	)
+	if err != nil {
+		return diag.Errorf("could not delete parser: %s", err)
 	}
 	return nil
 }

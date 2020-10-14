@@ -15,21 +15,23 @@
 package humio
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 
 	humio "github.com/humio/cli/api"
 )
 
 func resourceAlert() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceAlertCreate,
-		Read:   resourceAlertRead,
-		Update: resourceAlertUpdate,
-		Delete: resourceAlertDelete,
+		CreateContext: resourceAlertCreate,
+		ReadContext:   resourceAlertRead,
+		UpdateContext: resourceAlertUpdate,
+		DeleteContext: resourceAlertDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -55,10 +57,13 @@ func resourceAlert() *schema.Resource {
 			"throttle_time_millis": {
 				Type:     schema.TypeInt,
 				Required: true,
+				// TODO: Figure out if we want to accept similar input as "start", if yes reuse the ValidateDiagFunc for "start" and rename this field.
 			},
 			"start": {
 				Type:     schema.TypeString,
 				Required: true,
+				// TODO: Add ValidateDiagFunc, we accept only digits followed by a unit, e.g. 5m, 24h, 2w
+				// ValidateDiagFunc:
 			},
 			"query": {
 				Type:     schema.TypeString,
@@ -78,75 +83,124 @@ func resourceAlert() *schema.Resource {
 	}
 }
 
-func resourceAlertCreate(d *schema.ResourceData, client interface{}) error {
-	alert, err := alertFromResourceData(d, client)
+func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
+	alert, err := alertFromResourceData(d)
 	if err != nil {
-		return fmt.Errorf("could not obtain alert from resource data: %v", err)
+		return diag.Errorf("could not obtain alert from resource data: %s", err)
 	}
 
-	_, err = client.(*humio.Client).Alerts().Add(d.Get("repository").(string), &alert, false)
+	_, err = client.(*humio.Client).Alerts().Add(
+		d.Get("repository").(string),
+		&alert,
+		false,
+	)
 	if err != nil {
-		return fmt.Errorf("could not create alert: %v", err)
+		return diag.Errorf("could not create alert: %s", err)
 	}
 	d.SetId(fmt.Sprintf("%s+%s", d.Get("repository"), d.Get("name")))
 
-	return resourceAlertRead(d, client)
+	return resourceAlertRead(ctx, d, client)
 }
 
-func resourceAlertRead(d *schema.ResourceData, client interface{}) error {
+func resourceAlertRead(_ context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
 	// If we don't have a repository when importing, we parse it from the ID.
 	if _, ok := d.GetOk("repository"); !ok {
-		parts := parseRepositoryAndName(d.Id())
+		parts := parseRepositoryAndID(d.Id())
 		//we check that we have parsed the id into the correct number of segments
 		if parts[0] == "" || parts[1] == "" {
-			return fmt.Errorf("Error Importing humio_alert. Please make sure the ID is in the form REPOSITORYNAME+ALERTNAME (i.e. myRepoName+myAlertName")
+			return diag.Errorf("error importing humio_alert. Please make sure the ID is in the form REPOSITORYNAME+ALERTNAME (i.e. myRepoName+myAlertName")
 		}
-		d.Set("repository", parts[0])
-		d.Set("name", parts[1])
+		err := d.Set("repository", parts[0])
+		if err != nil {
+			return diag.Errorf("error setting repository for resource %s: %s", d.Id(), err)
+		}
+		err = d.Set("name", parts[1])
+		if err != nil {
+			return diag.Errorf("error setting name for resource %s: %s", d.Id(), err)
+		}
 	}
 
-	alert, err := client.(*humio.Client).Alerts().Get(d.Get("repository").(string), d.Get("name").(string))
+	alert, err := client.(*humio.Client).Alerts().Get(
+		d.Get("repository").(string),
+		d.Get("name").(string),
+	)
 	if err != nil {
-		return fmt.Errorf("could not get alert: %v", err)
+		return diag.Errorf("could not get alert: %s", err)
 	}
-	resourceDataFromAlert(alert, d)
+	return resourceDataFromAlert(alert, d)
+}
+
+func resourceDataFromAlert(a *humio.Alert, d *schema.ResourceData) diag.Diagnostics {
+	err := d.Set("name", a.Name)
+	if err != nil {
+		return diag.Errorf("error setting name for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("description", a.Description)
+	if err != nil {
+		return diag.Errorf("error setting description for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("throttle_time_millis", a.ThrottleTimeMillis)
+	if err != nil {
+		return diag.Errorf("error setting throttle_time_millis for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("silenced", a.Silenced)
+	if err != nil {
+		return diag.Errorf("error setting silenced for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("notifiers", a.Notifiers)
+	if err != nil {
+		return diag.Errorf("error setting notifiers for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("labels", a.Labels)
+	if err != nil {
+		return diag.Errorf("error setting labels for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("query", a.Query.QueryString)
+	if err != nil {
+		return diag.Errorf("error setting query for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("start", a.Query.Start)
+	if err != nil {
+		return diag.Errorf("error setting start for resource %s: %s", d.Id(), err)
+	}
 	return nil
 }
 
-func resourceDataFromAlert(a *humio.Alert, d *schema.ResourceData) error {
-	d.Set("name", a.Name)
-	d.Set("description", a.Description)
-	d.Set("throttle_time_millis", a.ThrottleTimeMillis)
-	d.Set("silenced", a.Silenced)
-	d.Set("notifiers", a.Notifiers)
-	d.Set("labels", a.Labels)
-	d.Set("query", a.Query.QueryString)
-	d.Set("start", a.Query.Start)
+func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
+	alert, err := alertFromResourceData(d)
+	if err != nil {
+		return diag.Errorf("could not obtain alert from resource data: %s", err)
+	}
+
+	_, err = client.(*humio.Client).Alerts().Add(
+		d.Get("repository").(string),
+		&alert,
+		true,
+	)
+	if err != nil {
+		return diag.Errorf("could not update alert: %s", err)
+	}
+
+	return resourceAlertRead(ctx, d, client)
+}
+
+func resourceAlertDelete(_ context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
+	alert, err := alertFromResourceData(d)
+	if err != nil {
+		return diag.Errorf("could not obtain alert from resource data: %s", err)
+	}
+
+	err = client.(*humio.Client).Alerts().Delete(
+		d.Get("repository").(string),
+		alert.Name,
+	)
+	if err != nil {
+		return diag.Errorf("could not delete alert: %s", err)
+	}
 	return nil
 }
 
-func resourceAlertUpdate(d *schema.ResourceData, client interface{}) error {
-	alert, err := alertFromResourceData(d, client)
-	if err != nil {
-		return fmt.Errorf("could not obtain alert from resource data: %v", err)
-	}
-
-	_, err = client.(*humio.Client).Alerts().Add(d.Get("repository").(string), &alert, true)
-	if err != nil {
-		return fmt.Errorf("could not create alert: %v", err)
-	}
-
-	return resourceAlertRead(d, client)
-}
-
-func resourceAlertDelete(d *schema.ResourceData, client interface{}) error {
-	if err := client.(*humio.Client).Alerts().Delete(d.Get("repository").(string), d.Get("name").(string)); err != nil {
-		return fmt.Errorf("could not delete alert: %v", err)
-	}
-	return nil
-}
-
-func alertFromResourceData(d *schema.ResourceData, client interface{}) (humio.Alert, error) {
+func alertFromResourceData(d *schema.ResourceData) (humio.Alert, error) {
 	return humio.Alert{
 		Name:               d.Get("name").(string),
 		Description:        d.Get("description").(string),

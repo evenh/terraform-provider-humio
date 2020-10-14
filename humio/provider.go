@@ -15,11 +15,16 @@
 package humio
 
 import (
+	"context"
+	"encoding/pem"
 	"fmt"
 	"net/url"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/go-cty/cty"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+
 	humio "github.com/humio/cli/api"
 )
 
@@ -28,15 +33,30 @@ type tfMap = map[string]interface{}
 
 func Provider() *schema.Provider {
 	return &schema.Provider{
-		ConfigureFunc: func(r *schema.ResourceData) (interface{}, error) {
-			client, err := humio.NewClient(humio.Config{
-				Address: r.Get("addr").(string),
-				Token:   r.Get("api_token").(string),
-			})
+		ConfigureContextFunc: func(ctx context.Context, r *schema.ResourceData) (interface{}, diag.Diagnostics) {
+			var diagnostics diag.Diagnostics
+			addr := r.Get("addr").(string)
+			url, err := url.Parse(addr)
 			if err != nil {
-				panic(fmt.Sprintf("could not create humio client: %v", err))
+				return nil, diag.FromErr(err)
 			}
-			return client, nil
+			caBundlePEM, ok := r.GetOk("ca_certificate_pem")
+			if ok {
+				pem, _ := pem.Decode([]byte(caBundlePEM.(string)))
+				if pem == nil {
+					return nil, diag.FromErr(fmt.Errorf("ca_certificate_pem specified but no pem was found"))
+				}
+				return humio.NewClient(humio.Config{
+					Address:          url,
+					Token:            r.Get("api_token").(string),
+					CACertificatePEM: caBundlePEM.(string),
+				}), diagnostics
+			}
+
+			return humio.NewClient(humio.Config{
+				Address: url,
+				Token:   r.Get("api_token").(string),
+			}), diagnostics
 		},
 		ResourcesMap: map[string]*schema.Resource{
 			"humio_alert":        resourceAlert(),
@@ -47,17 +67,10 @@ func Provider() *schema.Provider {
 		},
 		Schema: map[string]*schema.Schema{
 			"addr": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				DefaultFunc: schema.EnvDefaultFunc("HUMIO_ADDR", "https://cloud.humio.com/"),
-				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
-					v := val.(string)
-					if v[len(v)-1] != '/' {
-						// TODO: determine if we really want to enforce this.
-						return warns, append(errs, fmt.Errorf("error: address '%q' must contain a trailing '/', got: %s", key, v))
-					}
-					return validateURL(val, key)
-				},
+				Type:             schema.TypeString,
+				Optional:         true,
+				DefaultFunc:      schema.EnvDefaultFunc("HUMIO_ADDR", "https://cloud.humio.com/"),
+				ValidateDiagFunc: validateURL,
 			},
 			"api_token": {
 				Type:        schema.TypeString,
@@ -65,29 +78,72 @@ func Provider() *schema.Provider {
 				Sensitive:   true,
 				DefaultFunc: schema.EnvDefaultFunc("HUMIO_API_TOKEN", nil),
 			},
+			"ca_certificate_pem": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("HUMIO_CA_CERTIFICATE_PEM", nil),
+			},
 		},
 	}
 }
 
-func validateURL(val interface{}, key string) (warns []string, errs []error) {
+func validateURL(val interface{}, key cty.Path) diag.Diagnostics {
+	var diagnostics diag.Diagnostics
 	v := val.(string)
 	u, err := url.Parse(v)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("error: %s is not a valid URL", v))
+		diagnostics = append(diagnostics, diag.Diagnostic{
+			Severity:      diag.Error,
+			Summary:       "Invalid URL",
+			Detail:        fmt.Sprintf("%s is not a valid URL", v),
+			AttributePath: key,
+		})
 	} else if u.Scheme == "" || u.Host == "" {
-		errs = append(errs, fmt.Errorf("error: %s must be an absolute URL", v))
+		diagnostics = append(diagnostics, diag.Diagnostic{
+			Severity:      diag.Error,
+			Summary:       "Invalid URL",
+			Detail:        fmt.Sprintf("%s must be an absolute URL", v),
+			AttributePath: key,
+		})
 	} else if u.Scheme != "http" && u.Scheme != "https" {
-		errs = append(errs, fmt.Errorf("error: %s must begin with http or https", v))
+		diagnostics = append(diagnostics, diag.Diagnostic{
+			Severity:      diag.Error,
+			Summary:       "Invalid URL",
+			Detail:        fmt.Sprintf("%s must begin with http or https", v),
+			AttributePath: key,
+		})
 	}
-	return warns, errs
+	return diagnostics
 }
 
-func parseRepositoryAndName(id string) [2]string {
-	var repository, name string
-	parts := strings.SplitN(id, "+", 2)
+func parseRepositoryAndID(fullIdentifier string) [2]string {
+	var repository, id string
+	parts := strings.SplitN(fullIdentifier, "+", 2)
 	if len(parts) == 2 {
 		repository = parts[0]
-		name = parts[1]
+		id = parts[1]
 	}
-	return [2]string{repository, name}
+	return [2]string{repository, id}
+}
+
+// TODO: This can go away once https://github.com/hashicorp/terraform-plugin-sdk/issues/534 has been resolved
+//       See more here: https://discuss.hashicorp.com/t/validatefunc-deprecation-in-terraform-plugin-sdk-v2/12000/2
+func validateDiagFunc(validateFunc func(interface{}, string) ([]string, []error)) schema.SchemaValidateDiagFunc {
+	return func(i interface{}, path cty.Path) diag.Diagnostics {
+		warnings, errs := validateFunc(i, fmt.Sprintf("%+v", path))
+		var diagnostics diag.Diagnostics
+		for _, warning := range warnings {
+			diagnostics = append(diagnostics, diag.Diagnostic{
+				Severity: diag.Warning,
+				Summary:  warning,
+			})
+		}
+		for _, err := range errs {
+			diagnostics = append(diagnostics, diag.Diagnostic{
+				Severity: diag.Error,
+				Summary:  err.Error(),
+			})
+		}
+		return diagnostics
+	}
 }

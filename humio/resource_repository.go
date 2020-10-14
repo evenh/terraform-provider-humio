@@ -1,22 +1,23 @@
 package humio
 
 import (
-	"fmt"
+	"context"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 
 	humio "github.com/humio/cli/api"
 )
 
 func resourceRepository() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceRepositoryCreate,
-		Read:   resourceRepositoryRead,
-		Update: resourceRepositoryUpdate,
-		Delete: resourceRepositoryDelete,
+		CreateContext: resourceRepositoryCreate,
+		ReadContext:   resourceRepositoryRead,
+		UpdateContext: resourceRepositoryUpdate,
+		DeleteContext: resourceRepositoryDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -42,19 +43,19 @@ func resourceRepository() *schema.Resource {
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"storage_size_in_gb": {
-							Type:         schema.TypeFloat,
-							Optional:     true,
-							ValidateFunc: validation.FloatAtLeast(0),
+							Type:             schema.TypeFloat,
+							Optional:         true,
+							ValidateDiagFunc: validateDiagFunc(validation.FloatAtLeast(0)),
 						},
 						"ingest_size_in_gb": {
-							Type:         schema.TypeFloat,
-							Optional:     true,
-							ValidateFunc: validation.FloatAtLeast(0),
+							Type:             schema.TypeFloat,
+							Optional:         true,
+							ValidateDiagFunc: validateDiagFunc(validation.FloatAtLeast(0)),
 						},
 						"time_in_days": {
-							Type:         schema.TypeFloat,
-							Optional:     true,
-							ValidateFunc: validation.FloatAtLeast(0),
+							Type:             schema.TypeFloat,
+							Optional:         true,
+							ValidateDiagFunc: validateDiagFunc(validation.FloatAtLeast(0)),
 						},
 					},
 				},
@@ -63,66 +64,75 @@ func resourceRepository() *schema.Resource {
 	}
 }
 
-func resourceRepositoryCreate(d *schema.ResourceData, client interface{}) error {
-	err := client.(*humio.Client).Repositories().Create(
-		d.Get("name").(string),
+func resourceRepositoryCreate(ctx context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
+	repository, err := repositoryFromResourceData(d)
+	if err != nil {
+		return diag.Errorf("could not obtain repository from resource data: %s", err)
+	}
+
+	err = client.(*humio.Client).Repositories().Create(
+		repository.Name,
 	)
 	if err != nil {
-		return fmt.Errorf("could not create repository: %v", err)
+		return diag.Errorf("could not create repository: %s", err)
 	}
 
 	err = client.(*humio.Client).Repositories().UpdateDescription(
-		d.Get("name").(string),
-		d.Get("description").(string),
+		repository.Name,
+		repository.Description,
 	)
 	if err != nil {
-		return fmt.Errorf("could not set description for repository: %v", err)
+		return diag.Errorf("could not set description for repository: %s", err)
 	}
-	retention := d.Get("retention").(*schema.Set).List()[0].(tfMap)
 	err = client.(*humio.Client).Repositories().UpdateTimeBasedRetention(
-		d.Get("name").(string),
-		retention["time_in_days"].(float64),
+		repository.Name,
+		repository.RetentionDays,
 		d.Get("allow_data_deletion").(bool),
 	)
 	if err != nil {
-		return fmt.Errorf("could not set time based retention for repository: %v", err)
+		return diag.Errorf("could not set time based retention for repository: %s", err)
 	}
 	err = client.(*humio.Client).Repositories().UpdateIngestBasedRetention(
-		d.Get("name").(string),
-		retention["ingest_size_in_gb"].(float64),
+		repository.Name,
+		repository.IngestRetentionSizeGB,
 		d.Get("allow_data_deletion").(bool),
 	)
 	if err != nil {
-		return fmt.Errorf("could not set time based retention for repository: %v", err)
+		return diag.Errorf("could not set ingest size retention for repository: %s", err)
 	}
 	err = client.(*humio.Client).Repositories().UpdateStorageBasedRetention(
-		d.Get("name").(string),
-		retention["storage_size_in_gb"].(float64),
+		repository.Name,
+		repository.StorageRetentionSizeGB,
 		d.Get("allow_data_deletion").(bool),
 	)
 	if err != nil {
-		return fmt.Errorf("could not set time based retention for repository: %v", err)
+		return diag.Errorf("could not set storage size retention for repository: %s", err)
 	}
 
-	d.SetId(d.Get("name").(string))
+	d.SetId(repository.Name)
 
-	return resourceRepositoryRead(d, client)
+	return resourceRepositoryRead(ctx, d, client)
 }
 
-func resourceRepositoryRead(d *schema.ResourceData, client interface{}) error {
+func resourceRepositoryRead(_ context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
 	repo, err := client.(*humio.Client).Repositories().Get(d.Id())
 	if err != nil {
-		return fmt.Errorf("could not get repository: %v", err)
+		return diag.Errorf("could not get repository: %s", err)
 	}
-	resourceDataFromRepo(&repo, d)
-	return nil
+	return resourceDataFromRepository(&repo, d)
 }
 
-func resourceDataFromRepo(a *humio.Repository, d *schema.ResourceData) error {
-	d.Set("name", a.Name)
-	d.Set("description", a.Description)
+func resourceDataFromRepository(a *humio.Repository, d *schema.ResourceData) diag.Diagnostics {
+	err := d.Set("name", a.Name)
+	if err != nil {
+		return diag.Errorf("error setting name for resource %s: %s", d.Id(), err)
+	}
+	err = d.Set("description", a.Description)
+	if err != nil {
+		return diag.Errorf("error setting description for resource %s: %s", d.Id(), err)
+	}
 	if err := d.Set("retention", retentionFromRepository(a)); err != nil {
-		return fmt.Errorf("error setting retention settings for resource %s: %s", d.Id(), err)
+		return diag.Errorf("error setting retention settings for resource %s: %s", d.Id(), err)
 	}
 	return nil
 }
@@ -135,51 +145,73 @@ func retentionFromRepository(a *humio.Repository) []tfMap {
 	return []tfMap{s}
 }
 
-func resourceRepositoryUpdate(d *schema.ResourceData, client interface{}) error {
-	err := client.(*humio.Client).Repositories().UpdateDescription(
-		d.Get("name").(string),
-		d.Get("description").(string),
+func resourceRepositoryUpdate(ctx context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
+	repository, err := repositoryFromResourceData(d)
+	if err != nil {
+		return diag.Errorf("could not obtain repository from resource data: %s", err)
+	}
+
+	err = client.(*humio.Client).Repositories().UpdateDescription(
+		repository.Name,
+		repository.Description,
 	)
 	if err != nil {
-		return fmt.Errorf("could not set description for repository: %v", err)
+		return diag.Errorf("could not update description for repository: %s", err)
 	}
-	retention := d.Get("retention").(*schema.Set).List()[0].(tfMap)
 	err = client.(*humio.Client).Repositories().UpdateTimeBasedRetention(
-		d.Get("name").(string),
-		retention["time_in_days"].(float64),
+		repository.Name,
+		repository.RetentionDays,
 		d.Get("allow_data_deletion").(bool),
 	)
 	if err != nil {
-		return fmt.Errorf("could not set time based retention for repository: %v", err)
+		return diag.Errorf("could not update time based retention for repository: %s", err)
 	}
 	err = client.(*humio.Client).Repositories().UpdateIngestBasedRetention(
-		d.Get("name").(string),
-		retention["ingest_size_in_gb"].(float64),
+		repository.Name,
+		repository.IngestRetentionSizeGB,
 		d.Get("allow_data_deletion").(bool),
 	)
 	if err != nil {
-		return fmt.Errorf("could not set time based retention for repository: %v", err)
+		return diag.Errorf("could not update time based retention for repository: %s", err)
 	}
 	err = client.(*humio.Client).Repositories().UpdateStorageBasedRetention(
-		d.Get("name").(string),
-		retention["storage_size_in_gb"].(float64),
+		repository.Name,
+		repository.StorageRetentionSizeGB,
 		d.Get("allow_data_deletion").(bool),
 	)
 	if err != nil {
-		return fmt.Errorf("could not set time based retention for repository: %v", err)
+		return diag.Errorf("could not update time based retention for repository: %s", err)
 	}
 
-	return resourceRepositoryRead(d, client)
+	return resourceRepositoryRead(ctx, d, client)
 }
 
-func resourceRepositoryDelete(d *schema.ResourceData, client interface{}) error {
+func resourceRepositoryDelete(_ context.Context, d *schema.ResourceData, client interface{}) diag.Diagnostics {
+	repository, err := repositoryFromResourceData(d)
+	if err != nil {
+		return diag.Errorf("could not obtain repository from resource data: %s", err)
+	}
+
 	deleteReason := "Deleted by Terraform"
-	if err := client.(*humio.Client).Repositories().Delete(
-		d.Get("name").(string),
+	err = client.(*humio.Client).Repositories().Delete(
+		repository.Name,
 		deleteReason,
 		d.Get("allow_data_deletion").(bool),
-	); err != nil {
-		return fmt.Errorf("could not delete repository: %v", err)
+	)
+	if err != nil {
+		return diag.Errorf("could not delete repository: %s", err)
 	}
 	return nil
+}
+
+func repositoryFromResourceData(d *schema.ResourceData) (humio.Repository, error) {
+	retention := d.Get("retention").(*schema.Set).List()[0].(tfMap)
+
+	return humio.Repository{
+		Name:                   d.Get("name").(string),
+		Description:            d.Get("description").(string),
+		RetentionDays:          retention["time_in_days"].(float64),
+		IngestRetentionSizeGB:  retention["ingest_size_in_gb"].(float64),
+		StorageRetentionSizeGB: retention["storage_size_in_gb"].(float64),
+	}, nil
 }

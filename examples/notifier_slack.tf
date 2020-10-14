@@ -6,8 +6,9 @@ resource "humio_notifier" "example_slack" {
   slack {
     url    = "https://hooks.slack.com/services/XXXXXXXXX/YYYYYYYYY/ZZZZZZZZZZZZZZZZZZZZZZZZ"
     fields = {
-      Link = "{url}"
-      Query = "{query_string}"
+      "Events String" = "{events_str}"
+      "Query"         = "{query_string}"
+      "Time Interval" = "{query_time_interval}"
     }
   }
 }
