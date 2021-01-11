@@ -54,7 +54,7 @@ func resourceNotifier() *schema.Resource {
 				Type:     schema.TypeString,
 				Required: true,
 				ForceNew: true,
-				ValidateDiagFunc: validateDiagFunc(validation.StringInSlice([]string{
+				ValidateDiagFunc: validation.ToDiagFunc(validation.StringInSlice([]string{
 					humio.NotifierTypeEmail,
 					humio.NotifierTypeHumioRepo,
 					humio.NotifierTypeOpsGenie,
@@ -150,7 +150,7 @@ func resourceNotifier() *schema.Resource {
 						"severity": {
 							Type:     schema.TypeString,
 							Required: true,
-							ValidateDiagFunc: validateDiagFunc(validation.StringInSlice([]string{
+							ValidateDiagFunc: validation.ToDiagFunc(validation.StringInSlice([]string{
 								"critical",
 								"error",
 								"warning",
@@ -258,7 +258,7 @@ func resourceNotifier() *schema.Resource {
 							Type:     schema.TypeString,
 							Optional: true,
 							Default:  "POST",
-							ValidateDiagFunc: validateDiagFunc(validation.StringInSlice([]string{
+							ValidateDiagFunc: validation.ToDiagFunc(validation.StringInSlice([]string{
 								http.MethodGet,
 								http.MethodPost,
 								http.MethodPut,

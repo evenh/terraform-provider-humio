@@ -125,25 +125,3 @@ func parseRepositoryAndID(fullIdentifier string) [2]string {
 	}
 	return [2]string{repository, id}
 }
-
-// TODO: This can go away once https://github.com/hashicorp/terraform-plugin-sdk/issues/534 has been resolved
-//       See more here: https://discuss.hashicorp.com/t/validatefunc-deprecation-in-terraform-plugin-sdk-v2/12000/2
-func validateDiagFunc(validateFunc func(interface{}, string) ([]string, []error)) schema.SchemaValidateDiagFunc {
-	return func(i interface{}, path cty.Path) diag.Diagnostics {
-		warnings, errs := validateFunc(i, fmt.Sprintf("%+v", path))
-		var diagnostics diag.Diagnostics
-		for _, warning := range warnings {
-			diagnostics = append(diagnostics, diag.Diagnostic{
-				Severity: diag.Warning,
-				Summary:  warning,
-			})
-		}
-		for _, err := range errs {
-			diagnostics = append(diagnostics, diag.Diagnostic{
-				Severity: diag.Error,
-				Summary:  err.Error(),
-			})
-		}
-		return diagnostics
-	}
-}

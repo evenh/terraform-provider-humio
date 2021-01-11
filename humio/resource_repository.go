@@ -45,17 +45,17 @@ func resourceRepository() *schema.Resource {
 						"storage_size_in_gb": {
 							Type:             schema.TypeFloat,
 							Optional:         true,
-							ValidateDiagFunc: validateDiagFunc(validation.FloatAtLeast(0)),
+							ValidateDiagFunc: validation.ToDiagFunc(validation.FloatAtLeast(0)),
 						},
 						"ingest_size_in_gb": {
 							Type:             schema.TypeFloat,
 							Optional:         true,
-							ValidateDiagFunc: validateDiagFunc(validation.FloatAtLeast(0)),
+							ValidateDiagFunc: validation.ToDiagFunc(validation.FloatAtLeast(0)),
 						},
 						"time_in_days": {
 							Type:             schema.TypeFloat,
 							Optional:         true,
-							ValidateDiagFunc: validateDiagFunc(validation.FloatAtLeast(0)),
+							ValidateDiagFunc: validation.ToDiagFunc(validation.FloatAtLeast(0)),
 						},
 					},
 				},
