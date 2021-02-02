@@ -20,6 +20,10 @@ import (
 	"github.com/humio/terraform-provider-humio/humio"
 )
 
+var (
+	version = "dev"
+)
+
 func main() {
 	plugin.Serve(&plugin.ServeOpts{
 		ProviderFunc: humio.Provider,
